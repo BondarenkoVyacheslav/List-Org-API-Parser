@@ -17,7 +17,7 @@ import random
 from config import PROXYS, BASE_URL
 
 # Конфигурация
-INN = "7728484208"
+INN = "9201527690"
 SEARCH_URL = f"{BASE_URL}/search"
 
 
@@ -120,62 +120,65 @@ def get_excel_url_and_founders(driver, company_url):
             except Exception as e:
                 print(f"Ошибка при обработке строки таблицы: {e}")
 
-        # Ждем появления заголовка таблицы
-        WebDriverWait(driver, 1).until(
-            EC.presence_of_element_located(
-                (By.XPATH, "//*[contains(., 'Исполнительные производства по данным fssprus.ru')]"))
-        )
+        try:
+            # Ждем появления заголовка таблицы
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located(
+                    (By.XPATH, "//*[contains(., 'Исполнительные производства по данным fssprus.ru')]"))
+            )
 
-        # Находим таблицу с исполнительными производствами
-        table = driver.find_elements(By.CSS_SELECTOR, "table.tt")[-1]
-        rows = table.find_elements(By.CSS_SELECTOR, "tr:not(:has(th))")  # Пропускаем строку с заголовками
+            # Находим таблицу с исполнительными производствами
+            table = driver.find_elements(By.CSS_SELECTOR, "table.tt")[-1]
+            rows = table.find_elements(By.CSS_SELECTOR, "tr:not(:has(th))")  # Пропускаем строку с заголовками
 
-        current_status = None  # Для хранения текущего статуса (Открыто/Окончено)
+            current_status = None  # Для хранения текущего статуса (Открыто/Окончено)
 
-        for row in rows:
-            try:
-                cells = row.find_elements(By.TAG_NAME, "td")
+            for row in rows:
+                try:
+                    cells = row.find_elements(By.TAG_NAME, "td")
 
-                # Определяем статус (может быть объединен через rowspan)
-                if len(cells) >= 4:  # Полная строка со статусом
-                    status_cell = cells[0]
-                    if status_cell.text.strip():
-                        current_status = status_cell.text.strip()
-                    subject = cells[1].text.strip()
-                    count_debt = cells[2].text.strip()
-                    date = cells[3].text.strip()
-                elif len(cells) == 3:  # Строка продолжения с объединенным статусом
-                    subject = cells[0].text.strip()
-                    count_debt = cells[1].text.strip()
-                    date = cells[2].text.strip()
-                else:
-                    continue  # Пропускаем некорректные строки
+                    # Определяем статус (может быть объединен через rowspan)
+                    if len(cells) >= 4:  # Полная строка со статусом
+                        status_cell = cells[0]
+                        if status_cell.text.strip():
+                            current_status = status_cell.text.strip()
+                        subject = cells[1].text.strip()
+                        count_debt = cells[2].text.strip()
+                        date = cells[3].text.strip()
+                    elif len(cells) == 3:  # Строка продолжения с объединенным статусом
+                        subject = cells[0].text.strip()
+                        count_debt = cells[1].text.strip()
+                        date = cells[2].text.strip()
+                    else:
+                        continue  # Пропускаем некорректные строки
 
-                # Парсим количество и сумму долга
-                count = None
-                debt_amount = None
-                if "/" in count_debt:
-                    parts = count_debt.split("/")
-                    count = int(parts[0].strip())
-                    debt_match = re.search(r"(\d[\d\s]*)", parts[1])
-                    if debt_match:
-                        debt_amount = int(debt_match.group(1).replace(" ", ""))
-                else:
-                    count = int(count_debt.strip()) if count_debt.strip().isdigit() else None
+                    # Парсим количество и сумму долга
+                    count = None
+                    debt_amount = None
+                    if "/" in count_debt:
+                        parts = count_debt.split("/")
+                        count = int(parts[0].strip())
+                        debt_match = re.search(r"(\d[\d\s]*)", parts[1])
+                        if debt_match:
+                            debt_amount = int(debt_match.group(1).replace(" ", ""))
+                    else:
+                        count = int(count_debt.strip()) if count_debt.strip().isdigit() else None
 
-                # Формируем запись
-                record = {
-                    "Статус": current_status,
-                    "Предмет исполнения": subject,
-                    "Количество": count,
-                    "Сумма долга (руб)": debt_amount,
-                    "Дата последнего": date
-                }
-                result['Исполнительные производства по данным fssprus.ru'].append(record)
+                    # Формируем запись
+                    record = {
+                        "Статус": current_status,
+                        "Предмет исполнения": subject,
+                        "Количество": count,
+                        "Сумма долга (руб)": debt_amount,
+                        "Дата последнего": date
+                    }
+                    result['Исполнительные производства по данным fssprus.ru'].append(record)
 
-            except Exception as e:
-                # print(f"Ошибка при обработке строки: {str(e)}")
-                continue
+                except Exception as e:
+                    # print(f"Ошибка при обработке строки: {str(e)}")
+                    continue
+        except Exception as e:
+            result['Исполнительные производства по данным fssprus.ru'] = "Не найдены (по ИНН)"
 
         # 1. Ищем ссылку на Excel
         WebDriverWait(driver, 1).until(
