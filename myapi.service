@@ -1,0 +1,12 @@
+[Unit]
+Description=My Python API Service
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/var/www/api/
+ExecStart=/usr/bin/python3 /var/www/api/api.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

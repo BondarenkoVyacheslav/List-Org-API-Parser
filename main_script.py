@@ -14,27 +14,26 @@ from io import BytesIO
 import openpyxl
 import re
 import random
-from config import PROXY_LIST, BASE_URL
+from config import PROXYS, BASE_URL
 
 # Конфигурация
-INN = "7715758557"
+INN = "7728484208"
 SEARCH_URL = f"{BASE_URL}/search"
 
 
 def get_random_proxy():
-    """Возвращает случайный прокси из списка в формате для Selenium Wire"""
-    proxy = random.choice(PROXY_LIST)
-    host, port, username, password = proxy.split(':')
-    return {
-        'http': f'http://{username}:{password}@{host}:{port}',
-        'https': f'https://{username}:{password}@{host}:{port}',
-        'no_proxy': 'localhost,127.0.0.1'
-    }
-
+    """Возвращает случайный прокси из списка"""
+    return random.choice(PROXYS)
 
 def setup_selenium():
+    # chrome_path = "/usr/bin/google-chrome"
+    # driver_path = "/usr/local/bin/chromedriver"
+
+
     chrome_options = Options()
-    chrome_options.add_argument("--headless")
+    # chrome_options.binary_location = chrome_path
+    chrome_options.add_argument("--headless=new")
+    chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument(
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     )
@@ -42,8 +41,13 @@ def setup_selenium():
     chrome_options.add_argument('--disable-dev-shm-usage')
 
     # Настройка прокси через Selenium Wire
+    proxy = get_random_proxy()
     seleniumwire_options = {
-        'proxy': get_random_proxy(),
+        'proxy': {
+            'http': proxy['http'],
+            'https': proxy['https'],
+            'no_proxy': 'localhost,127.0.0.1'
+        },
         'verify_ssl': False
     }
 
@@ -208,7 +212,8 @@ def download_excel_to_memory(excel_url, cookies):
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
                 'Referer': BASE_URL
             },
-            stream=True
+            stream=True,
+            timeout=30
         )
         response.raise_for_status()
 
@@ -445,12 +450,12 @@ def main(inn):
         driver = setup_selenium()
         result["used_proxy"] = driver.proxy  # Записываем используемый прокси
 
-        time.sleep(0.5)
+        time.sleep(1)
         # Поиск компании
         session = requests.Session()
         search_response = session.get(
             SEARCH_URL,
-            params={"val": inn},
+            params={"val": inn, "type": "inn", "sort": ""},
             headers={
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
         )
@@ -461,7 +466,7 @@ def main(inn):
         company_link = soup.find('a', href=lambda x: x and '/company/' in x)
         if not company_link:
             result["error"] = "Компания не найдена"
-            return json.dumps(result, ensure_ascii=False, indent=2)
+            return result
 
         company_id = company_link['href'].split('/')[-1]
         company_url = f"{BASE_URL}/company/{company_id}"
@@ -475,7 +480,7 @@ def main(inn):
         excel_url = d['excel_url']
         if not excel_url:
             result["error"] = "Не удалось получить ссылку на Excel"
-            return json.dumps(result, ensure_ascii=False, indent=2)
+            return result
 
         result["excel_url"] = excel_url
 
@@ -486,13 +491,13 @@ def main(inn):
         excel_file = download_excel_to_memory(excel_url, selenium_cookies)
         if not excel_file:
             result["error"] = "Не удалось скачать файл"
-            return json.dumps(result, ensure_ascii=False, indent=2)
+            return result
 
         # Парсим данные из Excel
         parsed_data = parse_excel_with_multiple_tables(excel_file)
         if not parsed_data:
             result["error"] = "Не удалось распарсить данные из Excel"
-            return json.dumps(result, ensure_ascii=False, indent=2)
+            return result
 
         result["data"] = parsed_data
         result["data"]["Учредители"] = get_company_founders(company_id)
@@ -502,19 +507,19 @@ def main(inn):
 
         # result["data"]["company_info"]["Блокировка банковских счетов"] = block_info
 
-        return json.dumps(result, ensure_ascii=False, indent=4)
+        return result
 
     except Exception as e:
         result["error"] = str(e)
-        return json.dumps(result, ensure_ascii=False, indent=2)
+        return result
     finally:
-        driver.quit()
-        print("Завершение работы")
+        if driver:
+            driver.quit()
+        # print("Завершение работы")
 
 
 if __name__ == "__main__":
     start = time.time()
     print(main(INN))
-
     finish = time.time()
     print(finish - start)
