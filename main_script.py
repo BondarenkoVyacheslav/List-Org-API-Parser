@@ -15,9 +15,12 @@ import openpyxl
 import re
 import random
 from config import PROXYS, BASE_URL
+from typing import Optional
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Конфигурация
-INN = "9201527690"
+INN = "2308119595"
 SEARCH_URL = f"{BASE_URL}/search"
 
 
@@ -438,6 +441,135 @@ def get_company_founders(company_id):
         return {"error": f"Общая ошибка: {str(e)}"}
 
 
+# Константы (обратите внимание на русскую 'С' в начале)
+СBASE_URL = "https://companium.ru/search/tips?query="
+СDETAILS_URL = "https://companium.ru"
+DELAY_RANGE = (1, 3)
+СCOOKIES = {
+    '_ym_uid': '1747066760757332821',
+    '_ym_isad': '2',
+    '_companium_ru_session': 'xc%2F4BDXj6uc62w%2FzDNZNeG%2B1JkJYcD4Mt15Napzw5xdZ9RS1ZRMqAm4G1UZgkAdjvp5Fy0cTtKtcCiqCqN19BZpoDgc0lHye4dFAzjJLd9DEr5lYEpCvI4tJElzX5DrQHb8vwWoffDZxkAflbHJuaxeJ%2BLeKW%2FJ%2B6Y%2Fxw9AEwlIyS7nWRVyAHo%2FCSRDyvBUYvyPZaK%2B3R5RHYvCJbyRowR%2FMXbO6YUh%2F8lZeKVZdPCfO37FhjYc1SeC7tb0N40s9DggseZ3cBFcyDS79kgnT5CeGXTn7k9i88ZSs6%2BM%3D--rDEsdVTSYE%2FkEQVa--N8LadXM8e7WFcRFXlln98g%3D%3D',
+    '_ym_d': '1747591126'
+}
+СHEADERS = {
+    'authority': 'companium.ru',
+    'accept': '*/*',
+    'accept-language': 'ru,en;q=0.9,en-GB;q=0.8,en-US;q=0.7',
+    'referer': 'https://companium.ru/',
+    'sec-ch-ua': '"Chromium";v="136", "Microsoft Edge";v="136", "Not.A/Brand";v="99"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Windows"',
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0'
+}
+
+
+def extract_link(content: str) -> Optional[str]:
+    try:
+        href_start = content.find('href="') + 6
+        href_end = content.find('"', href_start)
+        return content[href_start:href_end]
+    except (IndexError, ValueError):
+        return None
+
+
+def random_delay():
+    time.sleep(random.uniform(*DELAY_RANGE))
+
+def parse_company_status(html: str) -> str:
+    """Извлекает статус компании из HTML"""
+
+    soup = BeautifulSoup(html, 'html.parser')
+
+    # Ищем статус в трех возможных вариантах (как в оригинальном парсере)
+    status_div = soup.find('div', class_="text-success fw-bold")  # Действующая
+    if not status_div:
+        status_div = soup.find('div', class_="text-danger fw-bold")  # Ликвидирована
+    if not status_div:
+        status_div = soup.find('div', class_="fw-bold special-status")  # Другой статус
+    if not status_div:
+        status_div = soup.find('div', class_="fw-bold text-danger")
+
+    if status_div:
+        # Убираем лишние пробелы и переносы строк
+        return ' '.join(status_div.get_text(strip=True).split())
+    return "Статус не определен"
+
+
+def companium_parser(inn: str) -> str:
+    """Возвращает статус компании по ИНН с использованием прокси"""
+    result = {
+        'status': "",
+        'error': None
+    }
+
+    session = requests.Session()
+    session.headers.update(СHEADERS)
+    session.cookies.update(СCOOKIES)
+
+    # Получаем случайный прокси из вашего списка
+    proxy = get_random_proxy()
+    session.proxies = {
+        'http': proxy['http'],
+        'https': proxy['https']
+    }
+
+    try:
+        # 1. Поиск компании по ИНН
+        random_delay()
+        search_url = f"{СBASE_URL}{inn}"
+        response = session.get(
+            search_url,
+            timeout=30,
+            verify=False  # Отключаем проверку SSL для работы через прокси
+        )
+
+        if response.status_code != 200:
+            result['error'] = f"Ошибка поиска: HTTP {response.status_code}"
+            return result['error']
+
+        # 2. Извлечение ссылки
+        data = response.json()
+        if not data or not isinstance(data, list):
+            result['error'] = "Компания не найдена"
+            return result['error']
+
+        first_result = data[0]
+        link = extract_link(first_result.get('content', ''))
+        if not link:
+            result['error'] = "Не удалось извлечь ссылку на компанию"
+            return result['error']
+
+        company_url = f"{СDETAILS_URL}{link}"
+
+        # 3. Загрузка страницы компании
+        random_delay()
+        company_response = session.get(
+            company_url,
+            timeout=30,
+            verify=False
+        )
+        if company_response.status_code != 200:
+            result['error'] = f"Ошибка загрузки страницы: HTTP {company_response.status_code}"
+            return result['error']
+
+        html = company_response.text
+        result['status'] = parse_company_status(html)
+
+    except requests.exceptions.ProxyError as e:
+        result['error'] = f"Ошибка прокси: {str(e)}"
+    except requests.exceptions.SSLError as e:
+        result['error'] = f"SSL ошибка: {str(e)}"
+    except requests.exceptions.RequestException as e:
+        result['error'] = f"Ошибка сети: {str(e)}"
+    except Exception as e:
+        result['error'] = f"Неожиданная ошибка: {str(e)}"
+
+    if result['error']:
+        return result['error']
+
+    return result['status']
+
+
 def main(inn):
     driver = None
     result = {
@@ -503,6 +635,7 @@ def main(inn):
             return result
 
         result["data"] = parsed_data
+        result["data"]['company_info']['Статус'] = companium_parser(inn)
         result["data"]["Учредители"] = get_company_founders(company_id)
         result["data"]["Арбитраж"] = arb_data
         result["data"]["Исполнительные производства по данным fssprus.ru"] = manufacture_data
